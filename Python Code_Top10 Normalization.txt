@@ -1,0 +1,160 @@
+import os
+import sys
+import csv
+import scipy as sp
+import numpy as np
+import pandas as pd
+from os import listdir
+from os import getcwd
+from os.path import isfile, join
+
+mypath = "c://Users/Dave Klawon/Desktop/Biocomputing final project/data"
+list_files = [f for f in listdir(mypath) if f.endswith(".csv") if isfile(join(mypath, f))]
+
+#
+for a, i in enumerate(list_files):
+    
+    #
+    print('Printing ' + list_files[a].split('.')[0] + ' to  new .csv in Biocomputing final project/Top10_Individual as Top10_' + list_files[a] + '...')
+    data = pd.read_csv(mypath + '/' + list_files[a], sep=',', names = ["CDR3", "TRAV", "TRAJ", "Frequency"])
+    
+    #Sort rows in the dataframe based on descending Frequencies
+    data.sort_values(['Frequency'], ascending = False)
+
+    #total the frequencies (reads) for calculating percentage later
+    total_reads = 0
+    for index, row in data.iterrows():
+        total_reads = total_reads + data.loc[index, 'Frequency']
+
+    #Make 2 new dataframes: top10 = top 10 rows from the ordered data; exclude_top10 = dataframe without top 10 rows
+    top10 = data[0:10]
+    exclude_top10 = data[11:len(data)]
+
+    #Define Levenshtein Distance as the minimal number of insertions, deletions, and substitutions of one character for another that will transform one string into the other
+    #http://www.cs.tufts.edu/comp/150GEN/classpages/Levenshtein.html
+    #https://stackoverflow.com/questions/2460177/edit-distance-in-python
+    def levenshteinDistance(s1, s2):
+        if len(s1) > len(s2):
+            s1, s2 = s2, s1
+        distances = range(len(s1) + 1)
+        for i2, c2 in enumerate(s2):
+            distances_ = [i2+1]
+            for i1, c1 in enumerate(s1):
+                if c1 == c2:
+                    distances_.append(distances[i1])
+                else:
+                    distances_.append(1 + min((distances[i1], distances[i1 + 1], distances_[-1])))
+            distances = distances_
+        return distances[-1]
+
+    #Define a function to iterate each of the top 10 CDR3s with the others to ensure dissimilarity
+    #
+    Corr_Freq = []
+    del_indexes = []
+    def Correct_top10 (s = top10.loc[0, 'TRAV'], t = top10.loc[0, 'TRAJ'], u = top10.loc[0, 'CDR3'], p = top10.loc[0, 'Frequency']):
+        Corr_Freq_n = p
+        for index, row in top10.iterrows():
+            if row['TRAV'] == s and row['TRAJ'] == t:
+                x = levenshteinDistance(u, row['CDR3'])
+                if x != 0 and x <= 2:
+                    Corr_Freq_n = Corr_Freq_n + row['Frequency']
+                    del_indexes.append(index)
+        Corr_Freq.append(Corr_Freq_n)
+        Corr_Freq_n = 0
+
+    #
+    for i in range(10):
+        Correct_top10 (s = top10.loc[i, 'TRAV'], t = top10.loc[i, 'TRAJ'], u = top10.loc[i, 'CDR3'], p = top10.loc[i, 'Frequency'])
+    k = 0
+    while k < (len(del_indexes) / 2):
+        top10.drop(del_indexes[k], inplace=True)
+        del Corr_Freq[del_indexes[k]]
+        k = (k + 1)
+
+    #Add the list to the top10 dataframe as a new column
+    top10['Corr Freq'] = Corr_Freq
+
+    #make a list of indexes remaining in top10 after correcting for similarity between CDR3s within top10
+    available_index = []
+    for index, row in top10.iterrows():
+        available_index.append(index)
+
+    #define a function 'Normalize' that finds similar CDR3s in exclude_top10 to a given input CDR3 from top10, adds the similar frequencies to the top10 frequency, then appends the result to a list
+    normFreq_all = []
+    normFreq_n=0
+    def Normalize (x = top10.loc[0, 'TRAV'], y = top10.loc[0, 'TRAJ'], z = top10.loc[0, 'CDR3'], w = top10.loc[0, 'Corr Freq']):
+        normFreq_n = w 
+        for index, row in exclude_top10.iterrows():
+            if row['TRAV'] == x and row['TRAJ'] ==  y:
+                q = levenshteinDistance(top10.loc[0, 'CDR3'], row['CDR3'])
+                if q <= 2:
+                    normFreq_n = normFreq_n + row['Frequency']
+        normFreq_all.append(normFreq_n)
+        normFreq_n = 0
+
+    #create a list of the normalized frequencies for each sample in top10
+    for i in available_index:
+        Normalize(x = top10.loc[i, 'TRAV'], y = top10.loc[i, 'TRAJ'], z = top10.loc[i, 'CDR3'], w = top10.loc[i, 'Corr Freq'])
+
+    #Add the list to the top10 dataframe as a new column
+    top10['Norm Freq'] = normFreq_all
+
+    #Define a function to calculate the percentage of the normalized frequency within the whole repertoire, then iterate by remaining rows in top10, then append column to top10 dataframe
+    Perc_of_Rep = []
+    def PercentRep (a = top10.loc[0, 'Norm Freq']):
+        b = (a / total_reads) * 100
+        Perc_of_Rep.append(b)
+    for i in available_index:
+        PercentRep (a = top10.loc[i, 'Norm Freq'])
+    top10['Percent of Rep'] = Perc_of_Rep
+    
+    #Print completed dataframe to a new .csv file for further crossreference analysis
+    top10.to_csv('./Top10_Individual/Top10_' + list_files[a], sep = ',', encoding = 'utf-8', index = False)
+    print('Completed ' + list_files[a].split('.')[0])
+
+###################
+
+mynewpath = "c://Users/Dave Klawon/Desktop/Biocomputing final project/Top10_Individual"
+new_list_files = [f for f in listdir(mynewpath) if f.endswith(".csv") if isfile(join(mynewpath, f))]
+
+#
+list_all_dataframes = []
+print('Adding All Top10_Mouse_## dataframes to pandas dataframe list: list_all_dataframes')
+for a, i in enumerate(new_list_files):
+    data = pd.read_csv((mynewpath + '/' + new_list_files[a]), sep=',')
+    data.sort_values(['Percent of Rep'], ascending = False)
+    list_all_dataframes.append(data)
+
+#
+print('Concatinating to master pandas dataframe: all_mice')
+all_mice = pd.concat(list_all_dataframes, ignore_index=True)
+
+#
+num_of_mice = []
+def NumberofMice (s = all_mice.loc[0, 'TRAV'], t = all_mice.loc[0, 'TRAJ'], u = all_mice.loc[0, 'CDR3']):
+    num_of_mice_n = 0
+    for index, row in all_mice.iterrows():
+        if row['TRAV'] == s and row['TRAJ'] == t:
+            x = levenshteinDistance(u, row['CDR3'])
+            if x <= 2:
+                num_of_mice_n = num_of_mice_n + 1
+    num_of_mice.append(num_of_mice_n)
+    num_of_mice_n = 0
+
+#
+length_all_mice = []
+for index, row in all_mice.iterrows():
+    length_all_mice.append(index)
+for i in length_all_mice:
+    NumberofMice (s = all_mice.loc[i, 'TRAV'], t = all_mice.loc[i, 'TRAJ'], u = all_mice.loc[i, 'CDR3'])
+all_mice['Num of Mice Appearing'] = num_of_mice
+
+#
+for index, row in all_mice.iterrows():
+    if row['Num of Mice Appearing'] == 1 and row['Percent of Rep'] < 10.0:
+        all_mice.drop(index, inplace=True)
+all_mice = all_mice.sort_values(['Num of Mice Appearing', 'Percent of Rep'], ascending = [False, False])
+
+#Print completed dataframe to a new .csv file for plotting in R
+all_mice.to_csv('./Top_TCRs_Compiled_All_Mice.csv', sep = ',', encoding = 'utf-8', index = False)
+print('Wrote all_mice as Top_TCRs_Compiled_All_Mice.csv in working directory')
